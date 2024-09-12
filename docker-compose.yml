@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:latest
+    environment:
+#      POSTGRES_USER: my_db_user
+#      POSTGRES_PASSWORD: my_secure_password
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 12345678
+      POSTGRES_DB: MyEnglishVocabulary
+#      FLYWAY_BASELINE_ON_MIGRATE: true
+
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./migrations:/docker-entrypoint-initdb.d/
+
+  flyway:
+    image: flyway/flyway
+    environment:
+      - FLYWAY_URL=jdbc:postgresql://db:5432/MyEnglishVocabulary
+#      - FLYWAY_USER=my_db_user
+#      - FLYWAY_PASSWORD=my_secure_password
+      - FLYWAY_USER=postgres
+      - FLYWAY_PASSWORD=12345678
+      - FLYWAY_CLEAN_DISABLED=false  # Разрешить выполнение команды clean
+    volumes:
+      - ./migrations:/flyway/sql
+    command: migrate
+
