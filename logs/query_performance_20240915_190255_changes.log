@@ -1,0 +1,4 @@
+после добавления индексов всё-ещё делается seq scan, поэтому
+
+ALTER SYSTEM SET random_page_cost = 1.0;
+

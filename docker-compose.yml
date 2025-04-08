@@ -1,31 +1,134 @@
-version: '3.8'
-
 services:
   db:
-    image: postgres:latest
+    image: postgres:16
     environment:
-#      POSTGRES_USER: my_db_user
-#      POSTGRES_PASSWORD: my_secure_password
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 12345678
-      POSTGRES_DB: MyEnglishVocabulary
-#      FLYWAY_BASELINE_ON_MIGRATE: true
-
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
     volumes:
-      - ./migrations:/docker-entrypoint-initdb.d/
+      - ./migrations:/flyway/sql  # Папка с миграциями
+      - ./pgdata:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 50
+
+  user_creator:
+    build: .
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+      - DB_CREATOR_USER=${DB_CREATOR_USER}
+      - DB_CREATOR_PASSWORD=${DB_CREATOR_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./scripts:/app/scripts  # Монтируем скрипты
+    working_dir: /app/scripts  # Устанавливаем рабочую директорию
+    command: >
+      sh -c "python create_user.py"
 
   flyway:
-    image: flyway/flyway
+    image: flyway/flyway:latest
     environment:
-      - FLYWAY_URL=jdbc:postgresql://db:5432/MyEnglishVocabulary
-#      - FLYWAY_USER=my_db_user
-#      - FLYWAY_PASSWORD=my_secure_password
-      - FLYWAY_USER=postgres
-      - FLYWAY_PASSWORD=12345678
-      - FLYWAY_CLEAN_DISABLED=false  # Разрешить выполнение команды clean
+      FLYWAY_USER: ${DB_CREATOR_USER}
+      FLYWAY_PASSWORD: ${DB_CREATOR_PASSWORD}
+      FLYWAY_URL: jdbc:postgresql://db:5432/${DB_NAME}
+      FLYWAY_TARGET: ${MIGRATION_VERSION:-latest}
+    depends_on:
+      user_creator:
+        condition: service_completed_successfully
     volumes:
-      - ./migrations:/flyway/sql
-    command: migrate
+      - ./migrations:/flyway/sql  # Папка с миграциями
+    command: ["migrate"]
 
+  data_populator:
+    build: .
+    environment:
+      - RUN_DATA_POPULATOR=${RUN_DATA_POPULATOR:-false}
+      - DATA_POPULATOR_NUM_RECORDS=${DATA_POPULATOR_NUM_RECORDS:-1000000}
+      - POSTGRES_USER=${DB_CREATOR_USER}
+      - POSTGRES_PASSWORD=${DB_CREATOR_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+      - MIGRATION_VERSION=${MIGRATION_VERSION}
+    volumes:
+      - ./scripts:/app/scripts  # Монтируем локальную папку со скриптами
+    working_dir: /app/scripts  # Устанавливаем рабочую директорию
+    command: >
+      sh -c "[ '$RUN_DATA_POPULATOR' = 'true' ] && python generate_data.py"
+    depends_on:
+      flyway:
+        condition: service_completed_successfully
+
+  setup_roles:
+    build: .
+    environment:
+      - NUM_OF_USERS=${NUM_OF_USERS:-3}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+      - RUN_SETUP_ROLES=${RUN_SETUP_ROLES}
+      - ANALYTIC_NAME=${ANALYTIC_NAME}
+      - ANALYTIC_PASSWORD=${ANALYTIC_PASSWORD}
+      - ANALYTIC_TABLE=${ANALYTIC_TABLE}
+      - NUM_OF_USERS=${NUM_OF_USERS}
+      - DB_NAME=${DB_NAME}
+      - TABLE_NAME=${ANALYTIC_TABLE}
+    volumes:
+      - ./scripts:/app/scripts  # Монтируем локальную папку со скриптами
+    working_dir: /app/scripts  # Устанавливаем рабочую директорию
+    command: >
+      sh -c "[ '$RUN_SETUP_ROLES' = 'true' ] && python setup_roles.py"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  analyze_service:
+    build: .
+    environment:
+      - USER=${DB_CREATOR_USER}
+      - PASSWORD=${DB_CREATOR_PASSWORD}
+      - DB=${DB_NAME}
+      - ATTEMPTS=${ANALYZE_ATTEMPTS:-5}
+    volumes:
+      - ./scripts:/app/scripts
+      - ./logs:/app/logs
+    working_dir: /app/scripts
+    command: sh -c "python analyze_service.py"
+    depends_on:
+      flyway:
+        condition: service_completed_successfully
+
+  backup_service:
+    build: .
+    container_name: backup_service
+    environment:
+      BACKUP_DIR: ${BACKUP_DIR}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_CREATOR_USER}
+      PGPASSWORD: ${DB_CREATOR_PASSWORD}
+      DB_HOST: db
+      DB_PORT: ${DB_PORT}
+      N_HOURS: ${BACKUP_HOURS}
+      M_BACKUPS: ${TOTAL_BACKUPS}
+    volumes:
+      - ./backups:/backups  # Локальная директория для хранения бэкапов
+    working_dir: /app/scripts
+    command: sh -c "[ '$RUN_BACKUP' = 'true' ] && python backup.py"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backup_network
+
+volumes:
+  db_data:
+
+networks:
+  default:
+    driver: bridge

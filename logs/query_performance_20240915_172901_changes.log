@@ -1,0 +1,2 @@
+CREATE INDEX idx_user_is_verified ON "User" (is_verified);
+CREATE INDEX idx_word_subcategory_id ON "Word" (subcategory_id);

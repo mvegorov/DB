@@ -1,0 +1,18 @@
+Query: SELECT * FROM "User";
+Cost: 22346.0
+Best Time: 1740.844
+Worst Time: 2423.11
+Average Time: 1929.5932
+========================================
+Query: SELECT * FROM "User" WHERE is_verified = TRUE;
+Cost: 19856.13
+Best Time: 60.861
+Worst Time: 1855.899
+Average Time: 420.626
+========================================
+Query: SELECT * FROM "Word" WHERE subcategory_id = 1;
+Cost: 3.33
+Best Time: 0.008
+Worst Time: 0.373
+Average Time: 0.083
+========================================

@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS "Sofia" (
+    id INT PRIMARY KEY,
+    word VARCHAR(256) NOT NULL
+);
